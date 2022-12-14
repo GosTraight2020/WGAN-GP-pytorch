@@ -1,79 +1,71 @@
 from load_dataset import Mnist32Dataset
 import torch 
 from torch.utils.data import DataLoader
-from model import Generator, Critic
+from model import WGAN_GP
 from torchvision import transforms
 from torch import optim, autograd
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
+from argparse import ArgumentParser
+import os
 
-batch_size = 128
-num_epochs = 30
+def build_parser():
+    parser = ArgumentParser()
+    parser.add_argument('--num_epochs', default=20, help='default: 20', type=int)
+    parser.add_argument('--batch_size', default=128, help='default: 128', type=int)
+    parser.add_argument('--dataset', '-D', help='mnist', required=True)
+    parser.add_argument('--ckpt_step', default=100, help='# of steps for saving checkpoint (default: 5000)', type=int)
+    parser.add_argument('--condition', action='store_true')
 
-def calc_gradient_penalty(critic, real_data, fake_data):
-    batch_size, c, h, w = real_data.shape
-    alpha = torch.rand([batch_size, 1, 1, 1]).repeat(1, c, h, w)
-    interpolate = alpha * real_data + (1-alpha) * fake_data
-    C_inter = critic(interpolate)
+    return parser
 
-    grad = autograd.grad(
-        outputs=C_inter, 
-        inputs=interpolate, 
-        grad_outputs=torch.ones_like(C_inter),
-        create_graph=True, 
-        retain_graph=True)[0]
+def train(model, data_loader, args, num_per_epoch):
+    for epoch in range(args.num_epochs):
+        for i, (real, label) in enumerate(data_loader):
+            step = num_per_epoch * epoch + i
+            for _ in range(5):
+                noise = torch.randn(args.batch_size, 100)
+                C_loss, W_dist, gp = model.train_critic_one_epoch(real, label, noise)
+            G_loss, fake = wgan_gp.train_generator_one_epoch(real, label, noise)
 
-    grad = grad.view(grad.size(0), -1)
-    gp = ((grad.norm(2, dim=1)-1)**2).mean()
-    return gp
+            print('{}, G_loss : {} , C_loss :{}'.format(i, G_loss, C_loss))
+            model.summary_writer.add_scalar('loss/C_loss', C_loss, global_step=step)
+            model.summary_writer.add_scalar('loss/G_loss', G_loss, global_step=step)
+            model.summary_writer.add_scalar('metric/W_dist', W_dist, global_step=step)
+            model.summary_writer.add_scalar('metric/gradient_penalty', gp, global_step=step)
+            model.summary_writer.add_image('sample/fake', (fake[:64]+1)/2, global_step=step, dataformats='NCHW')
+            model.summary_writer.add_image('sample/real', (real[:64]+1)/2, global_step=step, dataformats='NCHW')
+            model.summary_writer.flush()
+        
+            if step % args.ckpt_step == 0:
+                torch.save(wgan_gp.generator, os.path.join(wgan_gp.checkpoint_path, 'generator_{}_step.pth'.format(step)))
+                print('------------generator model of {} step has been saved'.format(step))
+
 
 train_transform = transforms.Compose([
     transforms.ToTensor(),
     transforms.Resize((32, 32))
 ])
-dataset = Mnist32Dataset(transform=train_transform)
-data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=1, drop_last=True)
-generator = Generator()
-critic = Critic()
-num_per_epoch = len(data_loader)
-one = torch.FloatTensor([1])
-mone = one * -1
 
-optimizerC = optim.Adam(critic.parameters(), lr=1e-4, betas=(0.0, 0.9))
-optimizerG = optim.Adam(generator.parameters(), lr=1e-4, betas=(0.0, 0.9))
 
-writer = SummaryWriter('./summary', flush_secs=30)
-for epoch in range(num_epochs):
-    for i, (real_image, label) in enumerate(data_loader):
-        step = num_per_epoch * epoch + i
-        for _ in range(5):
-            real = real_image
-            noise = torch.randn(batch_size, 100)
-            fake = generator(noise)
-            C_real = critic(real)
-            C_fake = critic(fake)
-            gp = calc_gradient_penalty(critic, real, fake)
-            W_dist = C_real.mean() - C_fake.mean()
-            C_loss = -W_dist + 10*gp
-            critic.zero_grad()
-            C_loss.backward(retain_graph=True)
-            optimizerC.step()
+if __name__ == '__main__':
 
-        noise = torch.randn(batch_size, 100)
-        fake = generator(noise)
-        C_fake = critic(fake)
-        G_loss = -torch.mean(C_fake)
-        generator.zero_grad()
-        G_loss.backward()
-        optimizerG.step()
+    parser = build_parser()
+    args = parser.parse_args()
+    data_shape = [1, 32, 32]
 
-        print('{}, G_loss : {} , C_loss :{}'.format(i, G_loss, C_loss))
-        writer.add_scalar('C_loss', C_loss, global_step=step)
-        writer.add_scalar('G_loss', G_loss, global_step=step)
-        writer.add_image('generated', (fake[:64]+1)/2, global_step=step, dataformats='NCHW')
-        writer.add_image('real', (real[:64]+1)/2, global_step=step, dataformats='NCHW')
-        writer.flush()
+    assert args.dataset in ['mnist']
+
+    if args.dataset == 'mnist':
+        dataset = Mnist32Dataset(transform=train_transform)
+        data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=1, drop_last=True)
+
+    num_per_epoch = len(data_loader)
+
+    wgan_gp = WGAN_GP(dataset=args.dataset, data_shape=data_shape, C_lr=1e-4, D_lr=1e-4, summary_path='./summary/', checkpoint_path='./checkpoints')        
+    train(wgan_gp, data_loader, args, num_per_epoch)
+
     
-
+ 
 
     
