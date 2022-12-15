@@ -9,6 +9,7 @@ import os, glob
 import json
 import scipy.misc
 import PIL.Image as Image
+import torch.nn.functional as F
 # train_data =  torchvision.datasets.MNIST(
 #     root = './data/MINIST',  #数据集的位置
 #     train = True,       #如果为True则为训练集，如果为False则为测试集
@@ -37,6 +38,9 @@ class Mnist32Dataset(Dataset):
         if self.transform is not None:
             img = self.transform(img)
         label = self.label_dict[file_index]
+        label = torch.from_numpy(np.array(int(label)))
+        label = F.one_hot(input=label, num_classes=10)
+        label = label.float()
         return img, label
 
     def __len__(self):
@@ -44,8 +48,7 @@ class Mnist32Dataset(Dataset):
 
 # dataset = Mnist32Dataset()
 # data_loader = DataLoader(dataset, batch_size=128, shuffle=True, num_workers=1, drop_last=True)
-# print(len(dataset))
-# print(len(data_loader))
+# print(dataset[0][1])
 
 
 

@@ -61,11 +61,16 @@ class Res_Block_down(nn.Module):
 
 
 class Generator_32(nn.Module):
-    def __init__(self, num_channels):
+    def __init__(self, num_channels, condition=False):
         super(Generator_32, self).__init__()
+
         self.nf = 64
         self.num_channels = num_channels
-        self.linear = nn.Linear(100, 4 * 4 * 8 * self.nf)
+        self.condition = condition
+        if self.condition:
+            self.linear = nn.Linear(in_features=110, out_features=4 * 4 * 8 * self.nf)
+        else:
+            self.linear = nn.Linear(in_features=100, out_features=4*4*8*self.nf)
         self.res_block1 = Res_Block_up(self.nf * 8, self.nf * 4)
         self.res_block2 = Res_Block_up(self.nf * 4, self.nf * 2)
         self.res_block3 = Res_Block_up(self.nf * 2, self.nf * 1)
@@ -74,7 +79,10 @@ class Generator_32(nn.Module):
         self.conv1 = nn.Conv2d(in_channels=self.nf*1, out_channels=self.num_channels, kernel_size=3, padding='same')
         self.tanh = nn.Tanh()
 
-    def forward(self, x):
+    def forward(self, x, y):
+        if self.condition:
+            y = y*10
+            x = torch.cat((x, y), dim=1)
         x = self.linear(x)
         x = x.view(-1, 8 * self.nf, 4, 4)
         x = self.res_block1(x)
@@ -84,6 +92,7 @@ class Generator_32(nn.Module):
         x = self.relu1(x)
         x = self.conv1(x)
         out = self.tanh(x)
+
         return out
 
 
@@ -109,14 +118,17 @@ class Critic_32(nn.Module):
         return x
 
 class WGAN_GP:
-    def __init__(self, dataset, data_shape, C_lr=1e-4, D_lr=1e-4, summary_path='./summary/', checkpoint_path='./checkpoints'):
+    def __init__(self, dataset, data_shape, condition=False, C_lr=1e-4, D_lr=1e-4, summary_path='./summary/', checkpoint_path='./checkpoints'):
         self.data_shape = data_shape
         self.C_lr = C_lr
         self.D_lr = D_lr
         self.lamda = 10.
+        self.condition = condition
+        if self.condition:
+            self.cos = nn.MSELoss()
         if self.data_shape[1] == 32:
             self.critic = Critic_32(num_channels=self.data_shape[0])
-            self.generator = Generator_32(num_channels=self.data_shape[0])
+            self.generator = Generator_32(num_channels=self.data_shape[0], condition=self.condition)
         self.C_opt = optim.Adam(self.critic.parameters(), lr=1e-4, betas=(0.0, 0.9))
         self.G_opt = optim.Adam(self.generator.parameters(), lr=1e-4, betas=(0.0, 0.9))
         self.summary_path = os.path.join(summary_path, dataset+'_'+str(self.data_shape[1]))
@@ -145,7 +157,7 @@ class WGAN_GP:
         return gp
     
     def train_critic_one_epoch(self, real, label, noise):
-        fake = self.generator(noise)
+        fake = self.generator(noise, label)
         C_real = self.critic(real)
         C_fake = self.critic(fake)
         gp = self.calc_gradient_penalty(real, fake)
@@ -157,15 +169,22 @@ class WGAN_GP:
         return C_loss, W_dist, gp
 
     def train_generator_one_epoch(self, real, label, noise):
-        fake = self.generator(noise)
+        fake = self.generator(noise, label)
         C_fake = self.critic(fake)
         G_loss = -torch.mean(C_fake)
-        self.generator.zero_grad()
-        G_loss.backward()
-        self.G_opt.step()
-        return G_loss, fake
+        if self.condition:
+            similarity = self.cos(fake, real)
+            similarity_loss = torch.mean(similarity)
+            G_total_loss = G_loss + 10*similarity_loss
+            self.generator.zero_grad()
+            G_total_loss.backward()
+            self.G_opt.step()
+            return G_loss, similarity_loss, G_total_loss
+        else:
+            self.generator.zero_grad()
+            G_loss.backward()
+            self.G_opt.step()
+            return G_loss
 
 
-class Siamese_net:
-    def __init__(self):
-        0-=
+
