@@ -57,7 +57,6 @@ def train(model, data_loader, args, num_per_epoch, data_shape):
                 torch.save(wgan_gp.generator, os.path.join(wgan_gp.checkpoint_path, 'generator_{}_step.pth'.format(step)))
                 log('Model of step {} has been save to {}'.format(step, wgan_gp.checkpoint_path), level=3)
 
-
 if __name__ == '__main__':
 
     parser = build_parser()

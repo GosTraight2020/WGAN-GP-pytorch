@@ -59,9 +59,9 @@ class Res_Block_down(nn.Module):
         return out
 
 class Generator_32(nn.Module):
-    def __init__(self, num_channels):
+    def __init__(self, num_channels, nf):
         super(Generator_32, self).__init__()
-        self.nf = 64
+        self.nf = nf
         self.num_channels = num_channels
         self.linear = nn.Linear(100, 4 * 4 * 8 * self.nf)
         self.res_block1 = Res_Block_up(self.nf * 8, self.nf * 4)
@@ -85,9 +85,9 @@ class Generator_32(nn.Module):
         return out
 
 class Critic_32(nn.Module):
-    def __init__(self, num_channels):
+    def __init__(self, num_channels, nf):
         super(Critic_32, self).__init__()
-        self.nf = 64
+        self.nf = nf
         self.num_channels = num_channels
         self.conv1 = nn.Conv2d(in_channels=self.num_channels, out_channels=self.nf * 1, kernel_size=3, padding='same')
         self.res_block1 = Res_Block_down(size=32, nf_input=self.nf * 1, nf_output=self.nf * 2)
@@ -106,9 +106,9 @@ class Critic_32(nn.Module):
         return x
 
 class Critic_128(nn.Module):
-    def __init__(self, num_channels):
+    def __init__(self, num_channels, nf):
         super(Critic_128, self).__init__()
-        self.nf = 32
+        self.nf = nf
         self.num_channels = num_channels
         self.conv1 = nn.Conv2d(in_channels=self.num_channels, out_channels=self.nf * 1, kernel_size=3, padding='same')
         self.res_block1 = Res_Block_down(size=128, nf_input=self.nf * 1, nf_output=self.nf * 2)
@@ -131,9 +131,9 @@ class Critic_128(nn.Module):
         return x
 
 class Generator_128(nn.Module):
-    def __init__(self, num_channels, activation='tanh'):
+    def __init__(self, num_channels, nf, activation='tanh'):
         super(Generator_128, self).__init__()
-        self.nf = 32
+        self.nf = nf
         self.num_channels = num_channels
         self.linear = nn.Linear(in_features=100, out_features=4*4*16*self.nf)
         self.res_block1 = Res_Block_up(self.nf * 16, self.nf * 16)
@@ -170,11 +170,11 @@ class WGAN_GP:
         self.G_lr = G_lr
         self.lamda = 10.
         if self.data_shape[1] == 32:
-            self.critic = Critic_32(num_channels=self.data_shape[0])
-            self.generator = Generator_32(num_channels=self.data_shape[0])
+            self.critic = Critic_32(num_channels=self.data_shape[0], nf=64)
+            self.generator = Generator_32(num_channels=self.data_shape[0], nf=64)
         elif self.data_shape[2] == 128:
-            self.critic = Critic_128(num_channels=self.data_shape[0])
-            self.generator = Generator_128(num_channels=self.data_shape[0], activation='relu')
+            self.critic = Critic_128(num_channels=self.data_shape[0], nf=32)
+            self.generator = Generator_128(num_channels=self.data_shape[0], nf=32, activation='relu')
         self.C_opt = optim.Adam(self.critic.parameters(), lr=self.C_lr, betas=(0.0, 0.9))
         self.G_opt = optim.Adam(self.generator.parameters(), lr=self.G_lr, betas=(0.0, 0.9))
         self.summary_path = os.path.join(summary_path, dataset+'_'+str(self.data_shape[1]))
