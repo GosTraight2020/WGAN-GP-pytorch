@@ -7,7 +7,7 @@ from torch import optim, autograd
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from argparse import ArgumentParser
-from uitls import merge, log
+from utils import merge, log
 import os
 import scipy.misc
 
@@ -17,11 +17,10 @@ def build_parser():
     parser.add_argument('--batch_size', default=128, help='default: 128', type=int)
     parser.add_argument('--dataset', '-D', help='mnist', required=True)
     parser.add_argument('--ckpt_step', default=100, help='# of steps for saving checkpoint (default: 5000)', type=int)
-
     return parser
 
 def train(model, data_loader, args, num_per_epoch, data_shape):
-    model.summary_writer.add_graph(model.generator, [torch.randn(128, 100), torch.randn(128, 10)])
+    model.summary_writer.add_graph(model.generator, torch.randn(128, 100))
     save_path = ('./eval/{}_{}/'.format(args.dataset, str(data_shape[1])))
     if not os.path.exists(save_path):
         log('Creating directory to save images: {}.'.format(save_path))
@@ -57,9 +56,6 @@ def train(model, data_loader, args, num_per_epoch, data_shape):
             if step != 0 and step % args.ckpt_step == 0:
                 torch.save(wgan_gp.generator, os.path.join(wgan_gp.checkpoint_path, 'generator_{}_step.pth'.format(step)))
                 log('Model of step {} has been save to {}'.format(step, wgan_gp.checkpoint_path), level=3)
-
-
-
 
 
 if __name__ == '__main__':

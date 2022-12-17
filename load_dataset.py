@@ -87,7 +87,7 @@ class LandslideDataSet(Dataset):
             image = hf['img'][:]  
         name = datafiles['name'] 
         image = np.asarray(image, np.float32)
-        size = image.shap
+        size = image.shape
         image = image[:, :, 3:0:-1].copy()
         image[np.isnan(image)] = 0.000001
 
