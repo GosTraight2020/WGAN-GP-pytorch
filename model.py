@@ -5,6 +5,7 @@ from torch.nn import Sequential
 from torch.utils.tensorboard import SummaryWriter
 from torch import optim, autograd
 import os 
+from utils import log
 
 class Res_Block_up(nn.Module):
     def __init__(self, nf_input, nf_output, kernel_size=3):
@@ -84,6 +85,27 @@ class Generator_32(nn.Module):
         out = self.tanh(x)
         return out
 
+class Encoder_32(nn.Module):
+    def __init__(self, num_channels, nf):
+        super(Encoder_32, self).__init__()
+        self.nf = nf
+        self.num_channels = num_channels
+        self.conv1 = nn.Conv2d(in_channels=self.num_channels, out_channels=self.nf * 1, kernel_size=3, padding='same')
+        self.res_block1 = Res_Block_down(size=32, nf_input=self.nf * 1, nf_output=self.nf * 2)
+        self.res_block2 = Res_Block_down(size=16, nf_input=self.nf * 2, nf_output=self.nf * 4)
+        self.res_block3 = Res_Block_down(size=8, nf_input=self.nf * 4, nf_output=self.nf * 8)
+        self.flatten = nn.Flatten()
+        self.linear = nn.Linear(in_features=512 * 4 * 4, out_features=100)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.res_block1(x)
+        x = self.res_block2(x)
+        x = self.res_block3(x)
+        x = self.flatten(x)
+        x = self.linear(x)
+        return x
+
 class Critic_32(nn.Module):
     def __init__(self, num_channels, nf):
         super(Critic_32, self).__init__()
@@ -118,6 +140,31 @@ class Critic_128(nn.Module):
         self.res_block5 = Res_Block_down(size=8, nf_input=self.nf * 16, nf_output=self.nf * 16)
         self.flatten = nn.Flatten()
         self.linear = nn.Linear(in_features=self.nf * 16 * 4 * 4, out_features=1)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.res_block1(x)
+        x = self.res_block2(x)
+        x = self.res_block3(x)
+        x = self.res_block4(x)
+        x = self.res_block5(x)
+        x = self.flatten(x)
+        x = self.linear(x)
+        return x
+
+class Encoder_128(nn.Module):
+    def __init__(self, num_channels, nf):
+        super(Encoder_128, self).__init__()
+        self.nf = nf
+        self.num_channels = num_channels
+        self.conv1 = nn.Conv2d(in_channels=self.num_channels, out_channels=self.nf * 1, kernel_size=3, padding='same')
+        self.res_block1 = Res_Block_down(size=128, nf_input=self.nf * 1, nf_output=self.nf * 2)
+        self.res_block2 = Res_Block_down(size=64, nf_input=self.nf * 2, nf_output=self.nf * 4)
+        self.res_block3 = Res_Block_down(size=32, nf_input=self.nf * 4, nf_output=self.nf * 8)
+        self.res_block4 = Res_Block_down(size=16, nf_input=self.nf * 8, nf_output=self.nf * 16)
+        self.res_block5 = Res_Block_down(size=8, nf_input=self.nf * 16, nf_output=self.nf * 16)
+        self.flatten = nn.Flatten()
+        self.linear = nn.Linear(in_features=self.nf * 16 * 4 * 4, out_features=100)
 
     def forward(self, x):
         x = self.conv1(x)
@@ -184,6 +231,7 @@ class WGAN_GP:
         if not os.path.exists(self.checkpoint_path):
             os.makedirs(self.checkpoint_path, exist_ok=True)
         self.summary_writer = SummaryWriter(self.summary_path, flush_secs=30)
+        log('Model has been created!')
 
     def calc_gradient_penalty(self, real_data, fake_data):
         batch_size, c, h, w = real_data.shape
@@ -223,3 +271,95 @@ class WGAN_GP:
         self.G_opt.step()
         return G_loss, fake
 
+class AE(nn.Module):
+    def __init__(self, data_shape, in_channels, out_channels, nf, g_activation='tanh'):
+        super(AE, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.nf = nf
+        self.data_shape = data_shape
+        if data_shape[1] == 32:
+            self.encoder = Encoder_32(self.in_channels, self.nf)
+            self.decoder = Generator_32(self.out_channels, self.nf, activation=g_activation)
+        elif data_shape[1] == 128:
+            self.encoder = Encoder_128(self.in_channels, self.nf)
+            self.decoder = Generator_128(self.out_channels, self.nf, activation=g_activation)
+    
+    def forward(self, x):
+        x = self.encoder(x)
+        x = self.decoder(x)
+        return x
+
+class AutoEncoder:
+    def __init__(self, dataset, data_shape, C_lr=1e-4, G_lr=1e-4, summary_path='./summary/', checkpoint_path='./checkpoints'):
+        self.dataset = dataset
+        self.data_shape = data_shape
+        self.C_lr = C_lr
+        self.G_lr = G_lr
+        self.lamda = 10.
+        if self.dataset == 'mnist':
+            self.critic = Critic_32(num_channels=self.data_shape[0], nf=64)
+            self.ae = AE(in_channels=1, out_channels=1, nf=64)
+        elif self.dataset == 'landslide':
+            self.critic = Critic_128(num_channels=3, nf=32)
+            self.ae = AE(data_shape=self.data_shape, in_channels=3, out_channels=3, nf=16, g_activation='relu')
+        self.C_opt = optim.Adam(self.critic.parameters(), lr=self.C_lr, betas=(0.0, 0.9))
+        self.G_opt = optim.Adam(self.ae.parameters(), lr=self.G_lr, betas=(0.0, 0.9))
+        self.l1_loss = nn.L1Loss()
+
+        self.summary_path = os.path.join(summary_path, 'AE', dataset+'_'+str(self.data_shape[1]))
+        self.checkpoint_path = os.path.join(checkpoint_path, 'AE', dataset+'_'+str(self.data_shape[1]))
+        self.eval_path = self.checkpoint_path.replace('checkpoints', 'eval')
+        if not os.path.exists(self.summary_path):
+            os.makedirs(self.summary_path, exist_ok=True)
+        if not os.path.exists(self.checkpoint_path):
+            os.makedirs(self.checkpoint_path, exist_ok=True)
+        if not os.path.exists(self.eval_path):
+            os.makedirs(self.eval_path, exist_ok=True)
+        self.summary_writer = SummaryWriter(self.summary_path, flush_secs=30)
+        log('Model has been created!')
+
+    def calc_gradient_penalty(self, real_data, fake_data):
+        batch_size, c, h, w = real_data.shape
+        alpha = torch.rand([batch_size, 1, 1, 1]).repeat(1, c, h, w)
+        interpolate = alpha * real_data + (1-alpha) * fake_data
+        C_inter = self.critic(interpolate)
+
+        grad = autograd.grad(
+            outputs=C_inter, 
+            inputs=interpolate, 
+            grad_outputs=torch.ones_like(C_inter),
+            create_graph=True, 
+            retain_graph=True)[0]
+
+        grad = grad.view(grad.size(0), -1)
+        gp = ((grad.norm(2, dim=1)-1)**2).mean()
+        return gp
+    
+    def train_critic_one_epoch(self, real):
+        fake = self.ae(real)
+        C_real = self.critic(real)
+        C_fake = self.critic(fake)
+        gp = self.calc_gradient_penalty(real, fake)
+        W_dist = C_real.mean() - C_fake.mean()
+        C_loss = -W_dist + self.lamda*gp
+        self.critic.zero_grad()
+        C_loss.backward(retain_graph=True)
+        self.C_opt.step()
+        return C_loss, W_dist, gp
+
+    def train_generator_one_epoch(self, real):
+        fake = self.ae(real)
+        C_fake = self.critic(fake)
+        G_loss = -torch.mean(C_fake)
+
+        recon_loss = self.l1_loss(fake, real)
+        loss = G_loss + 50*recon_loss
+        self.ae.zero_grad()
+        loss.backward()
+        # recon_loss.backward()
+        self.G_opt.step()
+        return G_loss, recon_loss, loss, fake
+        return recon_loss, fake
+
+ 
